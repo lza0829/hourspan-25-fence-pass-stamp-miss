@@ -1,0 +1,35 @@
+{
+  "_comment": "序栅栏夹具一：先合法后非法。合法序可检测/开段；非法序搁置，不入 hist/镜。",
+  "snapshots": [
+    {
+      "id": "SNAP-FENCE-LEGAL-EAST",
+      "store_id": "ST-EAST-01",
+      "as_of_ts": "2026-11-20T00:00:00Z",
+      "open_time": "07:00",
+      "close_time": "22:00",
+      "weekday_mask": "1111100",
+      "biz_status": "open",
+      "payload": {"reason": "合法序·提前营业", "fence_case": "legal_first"}
+    },
+    {
+      "id": "SNAP-FENCE-ILLEGAL-WEST",
+      "store_id": "ST-WEST-01",
+      "as_of_ts": "2026-11-20T01:00:00Z",
+      "open_time": "22:00",
+      "close_time": "08:00",
+      "weekday_mask": "1111100",
+      "biz_status": "open",
+      "payload": {"reason": "非法序·闭点开在开店前", "fence_case": "illegal_second"}
+    },
+    {
+      "id": "SNAP-FENCE-EQUAL-NORTH",
+      "store_id": "ST-NORTH-01",
+      "as_of_ts": "2026-11-20T02:00:00Z",
+      "open_time": "09:00",
+      "close_time": "09:00",
+      "weekday_mask": "1111100",
+      "biz_status": "open",
+      "payload": {"reason": "非法序·零时长相等", "fence_case": "illegal_equal"}
+    }
+  ]
+}

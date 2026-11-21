@@ -1,0 +1,11 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# 本地运行数据（SQLite）
+backend/data/
+
+# Node / 前端构建
+node_modules/
+dist/

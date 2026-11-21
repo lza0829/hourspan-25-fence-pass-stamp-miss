@@ -1,0 +1,15 @@
+{
+  "_comment": "序栅栏夹具二：先开 Type2 草稿后灌非法序。对 ST-EAST-01 灌入 close<=open 的快照，须清理该键未提交草稿且正式态保持冲突前。",
+  "snapshots": [
+    {
+      "id": "SNAP-FENCE-DRAFT-ILLEGAL-EAST",
+      "store_id": "ST-EAST-01",
+      "as_of_ts": "2026-11-21T00:00:00Z",
+      "open_time": "23:30",
+      "close_time": "06:30",
+      "weekday_mask": "1111100",
+      "biz_status": "open",
+      "payload": {"reason": "非法序·冲击未提交草稿", "fence_case": "draft_then_illegal"}
+    }
+  ]
+}
