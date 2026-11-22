@@ -128,6 +128,21 @@ CREATE TABLE IF NOT EXISTS fence_proofs (
   created_at TEXT NOT NULL
 );
 
+-- 序闸放行戳（架构甲：合法序开段同事务打戳，戳为后续写硬前置）
+CREATE TABLE IF NOT EXISTS fence_pass_stamps (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  store_id TEXT NOT NULL,
+  hist_id TEXT NOT NULL,
+  open_time TEXT,
+  close_time TEXT,
+  passed_at TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_fence_pass_hist
+  ON fence_pass_stamps(hist_id);
+CREATE INDEX IF NOT EXISTS ix_fence_pass_store
+  ON fence_pass_stamps(store_id);
+
 CREATE INDEX IF NOT EXISTS idx_hist_store_current
   ON dim_store_hours_hist(store_id, is_current);
 CREATE INDEX IF NOT EXISTS idx_snap_store_ts
@@ -167,8 +182,23 @@ def init_db():
         conn.execute("INSERT INTO settings(key, value) VALUES ('as_of_mode', 'business_ts')")
     if conn.execute("SELECT COUNT(*) AS c FROM stores").fetchone()["c"] == 0:
         _seed(conn)
+    # 老库升级：仅对建库种子段补落放行戳（它们在建库时即「已开段」）。
+    # 其它历史行若缺戳，按架构甲如实核证标缺，不作静默补戳。
+    _backfill_seed_stamps(conn)
     conn.commit()
     conn.close()
+
+
+def _backfill_seed_stamps(conn):
+    from app.modules.fence_pass_stamp import get_stamp, maybe_stamp
+
+    rows = conn.execute(
+        """SELECT * FROM dim_store_hours_hist
+           WHERE id LIKE 'HIST-SEED-%' AND open_time IS NOT NULL AND close_time IS NOT NULL"""
+    ).fetchall()
+    for h in rows:
+        if get_stamp(conn, h["id"]) is None:
+            maybe_stamp(conn, h["store_id"], h["id"], h["open_time"], h["close_time"])
 
 
 def _seed(conn):
@@ -240,3 +270,8 @@ def _seed(conn):
                 created,
             ),
         )
+        # 架构甲：种子段即首个已开段，建库时与 hist 同事务补落放行戳，
+        # 保证底座后续写闸自洽（当前段有戳，才允许继续入档 / 开段）。
+        from app.modules.fence_pass_stamp import maybe_stamp
+
+        maybe_stamp(conn, s["id"], hist_id, ot, ct)

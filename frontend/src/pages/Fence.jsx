@@ -3,10 +3,13 @@ import { api } from "../api.js";
 
 export default function Fence() {
   const [board, setBoard] = useState(null);
+  const [stamps, setStamps] = useState(null);
   const [err, setErr] = useState("");
 
   const reload = () =>
-    api("/api/fence/board").then(setBoard).catch((e) => setErr(String(e.message || e)));
+    Promise.all([api("/api/fence/board"), api("/api/fence/pass-stamps")])
+      .then(([b, s]) => { setBoard(b); setStamps(s); })
+      .catch((e) => setErr(String(e.message || e)));
 
   useEffect(() => { reload(); }, []);
 
@@ -18,7 +21,11 @@ export default function Fence() {
     ["已提交草稿", counts["已提交草稿"]],
     ["已废弃草稿", counts["已废弃草稿"]],
     ["审计条", counts["审计条"]],
+    ["放行戳", counts["放行戳"]],
+    ["当前段缺戳", counts["当前段缺戳"]],
   ];
+  const stampRows = stamps?.stamps || [];
+  const segVerdicts = stamps?.verification?.segments || [];
 
   return (
     <>
@@ -44,6 +51,67 @@ export default function Fence() {
             <div className="value">{v ?? "-"}</div>
           </div>
         ))}
+      </div>
+
+      <div className="panel">
+        <h2>序闸放行戳 fence_pass_stamps（架构甲：戳为后续写硬前置）</h2>
+        <p className="muted">
+          合法序开段标成功时同事务落戳（store_id / hist_id / open_time / close_time / passed_at），
+          缺戳或分叉即整笔回滚；非法序无戳；删戳后该店后续入档 / 开段一律拒绝。
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>id</th><th>门店</th><th>hist</th><th>开</th><th>闭</th><th>放行时刻</th>
+            </tr>
+          </thead>
+          <tbody>
+            {stampRows.map((r) => (
+              <tr key={r.id}>
+                <td>{r.id}</td>
+                <td>{r.store_id}</td>
+                <td className="mono">{r.hist_id}</td>
+                <td>{r.open_time}</td>
+                <td>{r.close_time}</td>
+                <td className="mono">{r.passed_at}</td>
+              </tr>
+            ))}
+            {stampRows.length === 0 && (
+              <tr><td colSpan={6} className="muted">（无戳）</td></tr>
+            )}
+          </tbody>
+        </table>
+        <h3>逐店后续写结论</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>门店</th><th>当前 hist</th><th>戳</th><th>hist 存在</th><th>后续写</th><th>原因</th>
+            </tr>
+          </thead>
+          <tbody>
+            {segVerdicts.map((v) => (
+              <tr key={v.store_id}>
+                <td>{v.store_id}</td>
+                <td className="mono">{v.hist_id || "—"}</td>
+                <td>
+                  <span className={`badge ${v.stamp_present ? "ok" : "bad"}`}>
+                    {v.stamp_present ? "有" : "缺"}
+                  </span>
+                </td>
+                <td>{v.hist_exists ? "是" : "否"}</td>
+                <td>
+                  <span className={`badge ${v.subsequent_write === "allowed" ? "ok" : "bad"}`}>
+                    {v.subsequent_write === "allowed" ? "放行" : "拒绝"}
+                  </span>
+                </td>
+                <td className="mono">{v.reason || "—"}</td>
+              </tr>
+            ))}
+            {segVerdicts.length === 0 && (
+              <tr><td colSpan={6} className="muted">（无历史段）</td></tr>
+            )}
+          </tbody>
+        </table>
       </div>
 
       <div className="panel">

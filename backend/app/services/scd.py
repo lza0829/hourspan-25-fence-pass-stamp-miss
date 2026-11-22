@@ -11,6 +11,28 @@ from app.modules.open_close_order_fence import (
     mark_drafts,
 )
 from app.seed import now_iso
+from app.modules import fence_pass_stamp
+
+
+def _stamp_missing_result(store_id: str, hist_id: str):
+    """开段成功而放行戳缺行：整笔回滚，报告可观测。"""
+    return {
+        "ok": False,
+        "code": "fence_pass_stamp_missing",
+        "message": f"开段成功但放行戳未落（store={store_id}, hist={hist_id}），整笔回滚",
+        "store_id": store_id,
+        "hist_id": hist_id,
+    }
+
+
+def _stamp_conflict_result(store_id: str, hist_id: str, reason):
+    return {
+        "ok": False,
+        "code": "fence_pass_stamp_conflict",
+        "message": f"放行戳写失败({reason})，整笔回滚",
+        "store_id": store_id,
+        "hist_id": hist_id,
+    }
 
 
 def apply_type2(detect_run_id: str):
@@ -20,6 +42,10 @@ def apply_type2(detect_run_id: str):
     开闭序；非法序当场搁置并废弃该草稿，绝不写 hist / 镜。全部处理完
     才把跑次置为 applied，保证无半截态：成功提交的草稿才对应新 hist 行，
     被拦的草稿留废弃痕迹，正式态保持冲突前。
+
+    放行戳（架构甲）：合法序开段标成功时，必须与开段同事务落 fence_pass
+    戳并与 hist 互证；戳缺行 / 键冲突即整笔回滚。已有当前段但无有效戳
+    （被删 / 被串改）则拒绝继续开段，即便 hist 存在——戳是后续写硬前置。
     """
     conn = connect()
     try:
@@ -74,6 +100,21 @@ def apply_type2(detect_run_id: str):
                 (store_id,),
             ).fetchone()
             valid_from = snap["as_of_ts"]
+            # 架构甲前置：当前段已存在，则必须先核到该段有效放行戳，
+            # 否则拒绝继续开段（无戳不因 hist 尚在而放行）。
+            if cur_hist is not None:
+                prior_ok, prior_why = fence_pass_stamp.has_valid_stamp(conn, cur_hist)
+                if not prior_ok:
+                    conn.rollback()
+                    return {
+                        "ok": False,
+                        "code": "prior_stamp_missing",
+                        "message": (
+                            f"当前段缺有效放行戳({prior_why})，拒绝继续开段，整笔回滚"
+                        ),
+                        "store_id": store_id,
+                        "hist_id": cur_hist["id"],
+                    }
             if cur_hist:
                 conn.execute(
                     """UPDATE dim_store_hours_hist
@@ -128,12 +169,28 @@ def apply_type2(detect_run_id: str):
                     rh,
                 ),
             )
+            # 架构甲：合法序开段标成功 → 同事务落放行戳，与 hist / 镜互证。
+            # 戳缺行或键冲突即整笔回滚，绝不留下「正式已开、戳空」。
+            stamp = fence_pass_stamp.maybe_stamp(
+                conn,
+                store_id,
+                new_id,
+                snap["open_time"],
+                snap["close_time"],
+            )
+            if not stamp.get("ok"):
+                conn.rollback()
+                if stamp.get("reason") == "stamp_key_conflict":
+                    return _stamp_conflict_result(store_id, new_id, stamp.get("reason"))
+                return _stamp_missing_result(store_id, new_id)
+
             applied.append(
                 {
                     "store_id": store_id,
                     "hist_id": new_id,
                     "closed": cur_hist["id"] if cur_hist else None,
                     "draft_id": draft["id"],
+                    "stamp_id": stamp.get("stamp_id"),
                 }
             )
 
@@ -167,6 +224,17 @@ def apply_type2(detect_run_id: str):
                     "message": f"镜出现非法开闭序({reason})，整趟回滚",
                     "store_id": m["store_id"],
                 }
+
+        # 落笔前回读互证：本次开段的每一新行都必须有逐字一致的放行戳。
+        # 缺戳 / 时刻分叉一律整笔回滚，杜绝「正式已开、戳空」。
+        for item in applied:
+            hist = conn.execute(
+                "SELECT * FROM dim_store_hours_hist WHERE id=?", (item["hist_id"],)
+            ).fetchone()
+            ok, why = fence_pass_stamp.has_valid_stamp(conn, hist)
+            if not ok:
+                conn.rollback()
+                return _stamp_missing_result(item["store_id"], item["hist_id"])
 
         conn.commit()
         return {
@@ -230,5 +298,3 @@ def rebuild_proofs():
         }
     finally:
         conn.close()
-
-# fence_pass_not_persisted on successful open path

@@ -5,8 +5,12 @@ from app.db import connect
 from app.modules.open_close_order_fence import (
     assert_snapshot_writable,
     create_draft,
+    record_proof,
 )
+from app.modules import fence_pass_stamp
 from app.seed import now_iso
+
+EVENT_STAMP_PRECONDITION = "stamp_precondition_reject"
 
 
 def run_detect(batch_id: str | None = None):
@@ -50,6 +54,28 @@ def run_detect(batch_id: str | None = None):
             )
             if not writable:
                 rejected.append(guard)
+                continue
+
+            # 架构甲后续写前置：当前段缺有效放行戳则拒绝继续检测 / 开段。
+            pre = fence_pass_stamp.prior_segment_stamp_ok(conn, snap["store_id"])
+            if not pre["ok"]:
+                record_proof(
+                    conn,
+                    snapshot_id=snap["id"],
+                    store_id=snap["store_id"],
+                    event=EVENT_STAMP_PRECONDITION,
+                    reason=pre["reason"],
+                    related_run_id=run_id,
+                    detail={"hist_id": pre["hist_id"]},
+                )
+                rejected.append(
+                    {
+                        "snapshot_id": snap["id"],
+                        "store_id": snap["store_id"],
+                        "hist_id": pre["hist_id"],
+                        "reason": pre["reason"],
+                    }
+                )
                 continue
 
             cur = conn.execute(

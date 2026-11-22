@@ -268,7 +268,10 @@ def assert_snapshot_writable(conn, snap, *, related_run_id) -> tuple[bool, dict 
 
 def board(conn) -> dict:
     """只读核证接口数据：搁置队列（快照 id/原因/关联 run/草稿清理位/载荷）、
-    未提交草稿、驳回审计流、汇总计数。"""
+    未提交草稿、驳回审计流、放行戳核证、汇总计数。"""
+    from app.modules import fence_pass_stamp
+
+    stamp_v = fence_pass_stamp.verify(conn)
     quarantined = [
         dict(r)
         for r in conn.execute(
@@ -304,17 +307,26 @@ def board(conn) -> dict:
                 "SELECT COUNT(*) AS c FROM source_snapshots WHERE applied=0"
             ).fetchone()["c"],
             "审计条": conn.execute("SELECT COUNT(*) AS c FROM fence_proofs").fetchone()["c"],
+            "放行戳": stamp_v["stamp_n"],
+            "放行戳待补": len(stamp_v["missing"]),
+            "放行戳分叉": len(stamp_v["time_mismatch"]) + len(stamp_v["store_mismatch"]),
+            "当前段缺戳": len(stamp_v["unattested_current"]),
         },
+        "放行戳核证": stamp_v,
         "搁置队列": quarantined,
         "草稿": drafts,
         "核证流": proofs,
     }
 
 
-def pass_stamp(conn, store_id: str, hist_id: str, open_time, close_time) -> None:
-    # 序闸已过；放行戳不落库
-    return None
+def pass_stamp(conn, store_id: str, hist_id: str, open_time, close_time) -> dict:
+    """序闸已过 → 落放行戳（架构甲：戳为后续写硬前置）。"""
+    from app.modules import fence_pass_stamp
+
+    return fence_pass_stamp.maybe_stamp(conn, store_id, hist_id, open_time, close_time)
 
 
 def list_pass_stamps(conn) -> list:
-    return []
+    from app.modules import fence_pass_stamp
+
+    return fence_pass_stamp.list_stamps(conn)["stamps"]

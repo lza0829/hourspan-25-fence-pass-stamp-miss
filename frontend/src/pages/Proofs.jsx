@@ -43,8 +43,46 @@ export default function Proofs() {
       </div>
       
       <div className="panel">
-        <h2>序闸放行戳</h2>
-        <pre className="msg">{companion ? JSON.stringify(companion, null, 2) : "（空）"}</pre>
+        <h2>序闸放行戳核证</h2>
+        {companion ? (
+          <>
+            <p className="muted">
+              {companion.architecture_label || ""} · 戳 {companion.pass_n} 条 ·
+              结论 <b>{companion.stamp_ready ? "互证通过" : "存在问题"}</b>
+            </p>
+            <p className="mono">{companion.rule || ""}</p>
+            <table>
+              <thead>
+                <tr>
+                  <th>门店</th><th>当前 hist</th><th>戳</th><th>hist 存在</th><th>后续写</th><th>原因</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(companion.verification?.segments || []).map((v) => (
+                  <tr key={v.store_id}>
+                    <td>{v.store_id}</td>
+                    <td className="mono">{v.hist_id || "—"}</td>
+                    <td>
+                      <span className={`badge ${v.stamp_present ? "ok" : "bad"}`}>
+                        {v.stamp_present ? "有" : "缺"}
+                      </span>
+                    </td>
+                    <td>{v.hist_exists ? "是" : "否"}</td>
+                    <td>
+                      <span className={`badge ${v.subsequent_write === "allowed" ? "ok" : "bad"}`}>
+                        {v.subsequent_write === "allowed" ? "放行" : "拒绝"}
+                      </span>
+                    </td>
+                    <td className="mono">{v.reason || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <pre className="msg">{JSON.stringify(companion.verification || {}, null, 2)}</pre>
+          </>
+        ) : (
+          <pre className="msg">（空）</pre>
+        )}
       </div>
       <div className="panel">
         <h2>scd_proofs</h2>

@@ -6,8 +6,12 @@ from app.modules.open_close_order_fence import (
     EVENT_QUARANTINED,
     check_order,
     quarantine_snapshot,
+    record_proof,
 )
+from app.modules import fence_pass_stamp
 from app.seed import now_iso, row_hash
+
+EVENT_STAMP_PRECONDITION = "stamp_precondition_reject"
 
 
 def run_batch(fixture_name: str = "ingest_change_batch.json"):
@@ -22,8 +26,35 @@ def run_batch(fixture_name: str = "ingest_change_batch.json"):
     accepted = 0
     skipped = 0
     quarantined = []
+    stamp_rejected = []
     try:
         for s in snaps:
+            # 架构甲后续写前置：当前段缺有效放行戳则拒绝继续入档（即使 hist 已存在）。
+            # 非法序快照仍先走下方入口分流（搁置 / 草稿清理），不被前置误并。
+            order_ok, reason = check_order(
+                s.get("open_time"), s.get("close_time")
+            )
+            if order_ok:
+                pre = fence_pass_stamp.prior_segment_stamp_ok(conn, s["store_id"])
+                if not pre["ok"]:
+                    stamp_rejected.append(
+                        {
+                            "store_id": s["store_id"],
+                            "hist_id": pre["hist_id"],
+                            "reason": pre["reason"],
+                        }
+                    )
+                    record_proof(
+                        conn,
+                        snapshot_id=s.get("id") or "",
+                        store_id=s["store_id"],
+                        event=EVENT_STAMP_PRECONDITION,
+                        reason=pre["reason"],
+                        related_run_id=batch_id,
+                        detail={"hist_id": pre["hist_id"], "fixture": fixture_name},
+                    )
+                    continue
+
             store = conn.execute("SELECT id FROM stores WHERE id=?", (s["store_id"],)).fetchone()
             if not store:
                 skipped += 1
@@ -83,6 +114,8 @@ def run_batch(fixture_name: str = "ingest_change_batch.json"):
             "quarantined": len(quarantined),
             "total": len(snaps),
             "quarantine_snapshot_ids": [q["snapshot_id"] for q in quarantined],
+            "stamp_rejected": len(stamp_rejected),
+            "stamp_reject_detail": stamp_rejected,
         }
         conn.execute(
             "INSERT INTO ingest_batches(id, created_at, report_json) VALUES (?,?,?)",

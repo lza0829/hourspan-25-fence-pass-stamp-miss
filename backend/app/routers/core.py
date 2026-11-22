@@ -183,14 +183,26 @@ def settings():
 def stubs():
     return {"stubs": STUBS}
 
-# --- plant routes ---
+# --- 序闸放行戳（架构甲）核证只读接口 ---
 from app.modules import fence_pass_stamp as fence_stamp
+
 
 @router.get("/fence/pass-stamps")
 def fence_pass_stamps():
+    """逐戳核证：戳表全量 + 与 hist 互证明细 + 逐店后续写结论。"""
     conn = connect()
     try:
         return fence_stamp.list_stamps(conn)
+    finally:
+        conn.close()
+
+
+@router.get("/fence/pass-stamps/verify")
+def fence_pass_stamps_verify():
+    """只读核证：缺戳 / 时刻分叉 / 门店分叉 / 孤儿 / 重复 / 非法戳 + 逐店结论。"""
+    conn = connect()
+    try:
+        return fence_stamp.verify(conn)
     finally:
         conn.close()
 
